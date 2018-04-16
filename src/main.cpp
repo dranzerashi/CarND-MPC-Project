@@ -40,6 +40,14 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
   }
   return result;
 }
+// Evaluate a polynomials derivative.
+double polyeval_derivative(Eigen::VectorXd coeffs, double x) {
+  double result = 0.0;
+  for (int i = 1; i < coeffs.size(); i++) {
+    result += coeffs[i] * i * pow(x, i-1);
+  }
+  return result;
+}
 
 // Fit a polynomial.
 // Adapted from
@@ -98,18 +106,41 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          Eigen::VectorXd ptsx_ref(ptsy.size());
+          Eigen::VectorXd ptsy_ref(ptsx.size());
+          
+          for(int i = 0; i < ptsx.size(); i++){
+            ptsx_ref[i]=ptsx[i];
+            ptsy_ref[i]=ptsy[i];
+          }
+          
+          Eigen::VectorXd coeffs = polyfit(ptsx_ref,ptsy_ref,3);
+          
+          double cte = polyeval(coeffs,px);
+          double epsi = psi - atan(polyeval_derivative(coeffs,px));
+          
+          Eigen::VectorXd state(6);
+          state << px, py, psi, v, cte, epsi;
+          
+          auto vars = mpc.Solve(state, coeffs);
+          
+          double steer_value = vars[1];
+          double throttle_value = vars[0];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = -steer_value/deg2rad(25);
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
+          
+          for(int i = 2; i < vars.size(); i+=2){  
+            mpc_x_vals.push_back(vars[i]);
+            mpc_y_vals.push_back(vars[i+1]);
+          }
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
