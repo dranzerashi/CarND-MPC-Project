@@ -99,6 +99,8 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double delta = j[1]["steering_angle"];
+          double a = j[1]["throttle"];
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -109,18 +111,32 @@ int main() {
           Eigen::VectorXd ptsx_ref(ptsy.size());
           Eigen::VectorXd ptsy_ref(ptsx.size());
           
-          for(int i = 0; i < ptsx.size(); i++){
-            ptsx_ref[i]=ptsx[i];
-            ptsy_ref[i]=ptsy[i];
+          for(unsigned int i = 0; i < ptsx.size(); i++){
+            double x = ptsx[i] - px;
+            double y = ptsy[i] - py;
+            ptsx_ref[i]=x*cos(-psi) - y*sin(-psi);
+            ptsy_ref[i]=x*sin(-psi) + y*cos(-psi);
           }
           
           Eigen::VectorXd coeffs = polyfit(ptsx_ref,ptsy_ref,3);
           
-          double cte = polyeval(coeffs,px);
-          double epsi = psi - atan(polyeval_derivative(coeffs,px));
+          
+          double cte = polyeval(coeffs,0.0);
+          double epsi = psi - atan(polyeval_derivative(coeffs,0.0));
+          
+          double timedelta = 0.1;
+          double Lf = 2.67;
+          
+          double new_x = v * timedelta; // x = 0 and cos(0) = 1
+          double new_y = 0; //y=0 and sin(0) = 0
+          double new_psi = (v/Lf) * (-delta) * timedelta; // psi = 0
+          double new_v = v + a * timedelta;
+          double new_cte = cte + v * sin(epsi) * timedelta;
+          double new_epsi = epsi + (v/Lf) * (-delta) * timedelta;
           
           Eigen::VectorXd state(6);
-          state << px, py, psi, v, cte, epsi;
+          state << new_x, new_y, new_psi, new_v, new_cte, new_epsi;
+          //state << px, py, psi, v, cte, epsi;
           
           auto vars = mpc.Solve(state, coeffs);
           
@@ -137,7 +153,7 @@ int main() {
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
           
-          for(int i = 2; i < vars.size(); i+=2){  
+          for(unsigned int i = 2; i < vars.size(); i+=2){  
             mpc_x_vals.push_back(vars[i]);
             mpc_y_vals.push_back(vars[i+1]);
           }
