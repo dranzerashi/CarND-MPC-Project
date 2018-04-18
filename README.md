@@ -95,3 +95,4 @@ In the solve function from MPC.cpp I returned an array with values at index 0 an
 I set the steering angle as `-steer_value/deg2rad(25)` and a directly to acceleration value obtained. I also set the mpc_x_vals and mpc_y_vals to the predicted x and y values to show the predicted path as green line in the simulator.
 
 
+Please find the recording of the final result [here](https://github.com/dranzerashi/CarND-MPC-Project/blob/master/result.mp4)
