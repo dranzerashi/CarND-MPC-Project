@@ -3,34 +3,6 @@ Self-Driving Car Engineer Nanodegree Program
 
 ---
 
-## Dependencies
-
-* cmake >= 3.5
- * All OSes: [click here for installation instructions](https://cmake.org/install/)
-* make >= 4.1(mac, linux), 3.81(Windows)
-  * Linux: make is installed by default on most Linux distros
-  * Mac: [install Xcode command line tools to get make](https://developer.apple.com/xcode/features/)
-  * Windows: [Click here for installation instructions](http://gnuwin32.sourceforge.net/packages/make.htm)
-* gcc/g++ >= 5.4
-  * Linux: gcc / g++ is installed by default on most Linux distros
-  * Mac: same deal as make - [install Xcode command line tools]((https://developer.apple.com/xcode/features/)
-  * Windows: recommend using [MinGW](http://www.mingw.org/)
-* [uWebSockets](https://github.com/uWebSockets/uWebSockets)
-  * Run either `install-mac.sh` or `install-ubuntu.sh`.
-  * If you install from source, checkout to commit `e94b6e1`, i.e.
-    ```
-    git clone https://github.com/uWebSockets/uWebSockets
-    cd uWebSockets
-    git checkout e94b6e1
-    ```
-    Some function signatures have changed in v0.14.x. See [this PR](https://github.com/udacity/CarND-MPC-Project/pull/3) for more details.
-
-* **Ipopt and CppAD:** Please refer to [this document](https://github.com/udacity/CarND-MPC-Project/blob/master/install_Ipopt_CppAD.md) for installation instructions.
-* [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page). This is already part of the repo so you shouldn't have to worry about it.
-* Simulator. You can download these from the [releases tab](https://github.com/udacity/self-driving-car-sim/releases).
-* Not a dependency but read the [DATA.md](./DATA.md) for a description of the data sent back from the simulator.
-
-
 ## Basic Build Instructions
 
 1. Clone this repo.
@@ -48,61 +20,78 @@ is the vehicle starting offset of a straight line (reference). If the MPC implem
 4.  Tips for setting up your environment are available [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
 5. **VM Latency:** Some students have reported differences in behavior using VM's ostensibly a result of latency.  Please let us know if issues arise as a result of a VM environment.
 
-## Editor Settings
+## Reflection
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
+Model predictive control (MPC) is an advanced method of process control that is used to control a process while satisfying a set of constraints. The models used in MPC are generally intended to represent the behavior of complex dynamical systems.
+In this project we modify the task of following a trajectory as an optimization problem of selecting the set of actuator values that result in the lowest cost.
 
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
+### Model
+First I get the following information from the message from the simulator:
+* ptsx (Array) - The global x positions of the waypoints.
+* ptsy (Array) - The global y positions of the waypoints.
+* psi (float) - The orientation of the vehicle in radians 
+* x (float) - The global x position of the vehicle.
+* y (float) - The global y position of the vehicle.
+* steering_angle (float) - The current steering angle in radians.
+* throttle (float) - The current throttle value [-1, 1].
 
-## Code Style
 
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
+#### Polynomial Fitting and MPC Preprocessing
+The server returns waypoints using the map's coordinate system, which is different than the car's coordinate system. I have transformed these waypoints to make it easier to both display them and to calculate the CTE and Epsi values for the MPC. This was done in lines 114-119 of `main.cpp` file. This is done by substituting in  the rotation translation matrix(homgeneous transformation matrix) equations. 
+First I translate from map coordinates to vehicle coordinate using:
+* x = waypoint_x[i] - px
+* y = waypoint_y[i] - py
+where px,py is the position of car.
+Then a rotation is applied with the heading angle of the car psi on these points in the reverse direction.
+* transformed_x = x * cos(-psi) - y * sin(-psi)
+* transformed_y = x * sin(-psi) + y * cos(-psi)
 
-## Project Instructions and Rubric
+This makes it such that the car is at the origin. Hence px and py can be considered as 0,0 from now.
+Then I used the polyfit function to fit a third degree polynomial to the transformed waypoints to get it's coefficients. 
+Now I used the polyeval function to find the cross track error cte as just the `polyeval(coeffs,0.0)`. and Error in heading angle as `-atan(polyeval_derivative(coeffs,0.0))` where the function `polyeval_derivative()` calculates the first order derivative of the linear equation.
 
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
 
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/b1ff3be0-c904-438e-aad3-2b5379f0e0c3/concepts/1a2255a0-e23c-44cf-8d41-39b8a3c8264a)
-for instructions and the project rubric.
+#### Model Predictive Control with Latency
+After this I added the term for dealing latency by using the model equations with a delta_time of 0.1 (100 milliseconds) to predict the new state after 100ms has passed.
+* new_x = x + v*cos(psi)*delta_time
+* new_y = y + v*sin(psi)*delta_time
+* new_psi = psi + (v/Lf) * -delta * delta_time
+* new_v = v + a * delta_time
+* new_cte = cte + v * sin(epsi) * timedelta;
+* new_epsi = epsi + (v/Lf) * (-delta) * timedelta;
+Here I take -delta since the delta from simulator is in reverse.
 
-## Hints!
+I then passed these new values as the state parameters for the Solve() function.
 
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
+#### Model Solve function
+To start off I set the N and dt values as 25 and 0.05 as suggested in the quizzes. I then set the number of model variables (includes both states and inputs) as `N * 6 + (N - 1) * 2`, as there are 6 state variables and 2 actuators.
+Then I set the initial value of the independent variables as zero except the initial state which were set to values obtained from the State variable that was passed to the function.
+Then I set all non-actuators upper and lowerlimits to the max negative and positive values. The upper and lower limits of delta are were set to -25 and 25 degrees (values in radians(-0.436332,0.436332)). Finally I set the Acceleration/decceleration upper and lower limits to -1, 1. 
 
-## Call for IDE Profiles Pull Requests
+Then I set the Lower and upper limits for the constraints 0 except for the initial state. For the initial state the constraints were set to the original state values x,y psi, v, cte and epsi.
 
-Help your fellow students!
+After this I setup the FG_eval object that computes objective and constraints by passing the coeffs. This is used in the `ipopt::solve()` function.
 
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
+#### Setting up Cost in FG_eval class
+Here The cost is stored is the first element of `fg`. We initialize it to zero and add the costs multiplied by corresponding weights.
 
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
+First I added the cost based on the reference state as follows:
+square(cte), square(epsi) and square(v-reference_velocity)
+Next I added the cost on delta and a to minimise the use of the actuators. square(a) and square(delta). This ensured that the actuators are used only when necessary and minimally.
+In order to smoothen out the use of the actuators and avoid any jerks or unsafe moves and minimize the value gap between sequential actuations, I finally added the cost of change in actuator values square(delta[t+1]-delta[t]) and square(a[t+1]-a[t]).
+Then using the model equations I predicted the values for each of the states for the next N timesteps and set them to corresponding variables.
+##### Weight of cost and Timestep Length and Elapsed Duration (N & dt) tuning
 
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
+Initially I kept the weights of the costs to 1 except change in delta which was set to 500 as mentioned in the quiz. The reference velocity was kept at 40 and the N and dt as 25 and 0.05 as mentioned above. This immediately gave a very good result where the car was following the track perfectly. Hence I tried increasing the reference velocity to 60. This immediately caused the car to flip over quite badly. I varied the values of the cost for cte and epsi to 2, 5, 10 and 100, 200 and 1000, but increasing that was only giving worser results. So I set it back to 1 and I tried the costs 10, 50 ,100, 150 and 200 for use of actuator delta. 100 150 and 200 improved the results but the car was still flipping over. I also tried different values of N and dt but they did not give any considerable improvements.
 
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
+Hence I decided to decrease the reference velocity to 55.
+I used the weights 1,1,1,1,1,500,1 again for cte,epsi,v-ref_v,delta,a,delta_change,a_change respectively. Here also the car performed poorly on turns after the bride. But playing with values of 700 for change in delta and 100 to 200 for delta significantly improved the results. The car crossed the turn after the bridge but failed on the next turn. I decided to use 100 and 700 for delta and change in delta respectively. I found that the car was overshooting due to large accelerations even at turns. So I added a weigh of 20 to the cost of acceleration. This gave a very good path for the car to follow. I was satisfied with these values ( cte 1, epsi 1, v-ref_v 1, delta 100, a 20, change in delta 700, change in a 1). Further increase in any of these weights gave no further improvements.
 
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
+I then tried changing the N and dt to (20, 0.04), (20, 0.06), (30, 0.1) etc. While some of these showed no further improvements than what I already had, some of these completely caused car to crash. Hence I stuck with the original values for N and dt as (25, 0.05).
 
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
+#### Setting the steering value and Predicted path
+In the solve function from MPC.cpp I returned an array with values at index 0 and 1 set to delta and a. and the remaining values were set to the predicted x,y positions for N timesteps.
 
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
+I set the steering angle as `-steer_value/deg2rad(25)` and a directly to acceleration value obtained. I also set the mpc_x_vals and mpc_y_vals to the predicted x and y values to show the predicted path as green line in the simulator.
+
+
